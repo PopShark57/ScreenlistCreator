@@ -20,8 +20,25 @@ struct VideoItem: Identifiable {
     var displayName: String { url.lastPathComponent }
 
     var subtitle: String {
-        guard let m = metadata else { return "Reading info…" }
-        return "\(m.durationText)  •  \(m.resolutionText)  •  \(m.fileSizeText)"
+        guard let m = metadata else {
+            if case .failed = status { return "Could not be read — click the warning for details" }
+            return "Reading info…"
+        }
+        var parts = [m.durationText, m.resolutionText, m.fileSizeText]
+        // Worth surfacing: it explains why a file works here but not in QuickTime.
+        if m.backend == .ffmpeg { parts.append("FFmpeg") }
+        return parts.joined(separator: "  •  ")
+    }
+}
+
+struct FFmpegStatus: Sendable {
+    var isInstalled = false
+    var path = ""
+    var version = ""
+
+    var summary: String {
+        guard isInstalled else { return "Not found" }
+        return version.isEmpty ? path : "\(version) — \(path)"
     }
 }
 
@@ -36,11 +53,38 @@ final class AppViewModel: ObservableObject {
     @Published var isPreviewPresented = false
     @Published var isPreviewLoading = false
     @Published var lastError: String?
+    @Published var ffmpegStatus = FFmpegStatus()
 
     private var generationTask: Task<Void, Never>?
     private var previewTask: Task<Void, Never>?
 
-    static let allowedContentTypes: [UTType] = [.movie, .video, .mpeg4Movie, .quickTimeMovie, .avi]
+    static var allowedContentTypes: [UTType] { VideoFormats.openPanelContentTypes }
+
+    // MARK: - FFmpeg
+
+    func refreshFFmpegStatus() {
+        Task {
+            guard let tool = FFmpegLocator.locate() else {
+                ffmpegStatus = FFmpegStatus()
+                return
+            }
+            let version = await FFmpegLocator.version(of: tool)
+            ffmpegStatus = FFmpegStatus(isInstalled: true, path: tool.ffmpeg.path, version: version)
+        }
+    }
+
+    /// Re-reads files that failed to load. Called after the FFmpeg path changes so a
+    /// freshly installed copy picks up everything already sitting in the queue.
+    func retryFailedItems() {
+        for item in items {
+            guard case .failed = item.status else { continue }
+            update(id: item.id) {
+                $0.metadata = nil
+                $0.status = .loadingInfo
+            }
+            loadMetadata(for: item.id, url: item.url)
+        }
+    }
 
     // MARK: - Queue management
 

@@ -77,33 +77,78 @@ enum ScreenlistEngine {
         let count = settings.frameCount
         let times: [Double] = (0..<count).map { start + (Double($0) + 0.5) * span / Double(count) }
 
-        let asset = AVURLAsset(url: videoURL)
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = CGSize(width: CGFloat(layout.cellWidth) * 2, height: 0)
-        let tolerance = CMTime(seconds: min(1.0, span / Double(count) / 4), preferredTimescale: 600)
-        generator.requestedTimeToleranceBefore = tolerance
-        generator.requestedTimeToleranceAfter = tolerance
-
-        var frames: [CGImage?] = []
-        frames.reserveCapacity(count)
-        for (index, seconds) in times.enumerated() {
-            try Task.checkCancellation()
-            let time = CMTime(seconds: seconds, preferredTimescale: 600)
-            do {
-                let (image, _) = try await generator.image(at: time)
-                frames.append(image)
-            } catch {
-                frames.append(nil) // draw a placeholder for frames that fail to decode
-            }
-            progress(0.9 * Double(index + 1) / Double(count))
-        }
+        let frames = try await extractFrames(
+            videoURL: videoURL,
+            times: times,
+            maxWidth: layout.cellWidth * 2,
+            tolerance: min(1.0, span / Double(count) / 4),
+            metadata: metadata,
+            progress: progress
+        )
 
         try Task.checkCancellation()
         let sheet = try compose(frames: frames, times: times, layout: layout,
                                 metadata: metadata, settings: settings, videoURL: videoURL)
         progress(1.0)
         return sheet
+    }
+
+    // MARK: - Frame extraction
+
+    /// Grabs one frame per timestamp using whichever decoder claimed the file.
+    /// A `nil` entry means that frame could not be decoded and gets a placeholder.
+    private static func extractFrames(
+        videoURL: URL,
+        times: [Double],
+        maxWidth: Int,
+        tolerance: Double,
+        metadata: VideoMetadata,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> [CGImage?] {
+        var frames: [CGImage?] = []
+        frames.reserveCapacity(times.count)
+
+        // Resolved once per sheet: the AVFoundation path uses it only to rescue
+        // individual frames, so a missing FFmpeg is not fatal there.
+        let ffmpeg = FFmpegLocator.locate()
+        if metadata.backend == .ffmpeg, ffmpeg == nil {
+            throw FFmpegError.notInstalled(fileExtension: videoURL.pathExtension)
+        }
+
+        var generator: AVAssetImageGenerator?
+        if metadata.backend == .avFoundation {
+            generator = AVFoundationBackend.makeGenerator(
+                asset: await AVFoundationBackend.preparedAsset(url: videoURL),
+                maxWidth: maxWidth,
+                tolerance: CMTime(seconds: tolerance, preferredTimescale: 600)
+            )
+        }
+
+        for (index, seconds) in times.enumerated() {
+            try Task.checkCancellation()
+            var frame: CGImage?
+
+            if let generator {
+                frame = try? await generator.image(at: CMTime(seconds: seconds, preferredTimescale: 600)).image
+            }
+            // Also covers partially damaged files on the AVFoundation path, where
+            // some timestamps decode and others do not.
+            try Task.checkCancellation()
+            if frame == nil, let ffmpeg {
+                frame = try? await FFmpegBackend.extractFrame(
+                    url: videoURL,
+                    at: seconds,
+                    maxWidth: maxWidth,
+                    metadata: metadata,
+                    tool: ffmpeg
+                )
+            }
+
+            frames.append(frame)
+            progress(0.9 * Double(index + 1) / Double(times.count))
+        }
+
+        return frames
     }
 
     // MARK: - Layout

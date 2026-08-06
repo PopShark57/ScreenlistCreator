@@ -148,6 +148,10 @@ final class SettingsStore: ObservableObject {
     @Published var filenameTemplate: String { didSet { defaults.set(filenameTemplate, forKey: "filenameTemplate") } }
     @Published var collisionPolicy: CollisionPolicy { didSet { defaults.set(collisionPolicy.rawValue, forKey: "collisionPolicy") } }
 
+    /// Empty means "search the usual install locations". Read straight from
+    /// `UserDefaults` by `FFmpegLocator`, so the key has to stay in sync.
+    @Published var ffmpegPath: String { didSet { defaults.set(ffmpegPath, forKey: FFmpegLocator.overrideDefaultsKey) } }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         rows = defaults.object(forKey: "rows") as? Int ?? 4
@@ -167,6 +171,7 @@ final class SettingsStore: ObservableObject {
         customFolderPath = defaults.string(forKey: "customFolderPath") ?? ""
         filenameTemplate = defaults.string(forKey: "filenameTemplate") ?? "{name}_screenlist"
         collisionPolicy = CollisionPolicy(rawValue: defaults.string(forKey: "collisionPolicy") ?? "") ?? .autoRename
+        ffmpegPath = defaults.string(forKey: FFmpegLocator.overrideDefaultsKey) ?? ""
     }
 
     func snapshot() -> SettingsSnapshot {
@@ -209,5 +214,6 @@ final class SettingsStore: ObservableObject {
         customFolderPath = ""
         filenameTemplate = "{name}_screenlist"
         collisionPolicy = .autoRename
+        ffmpegPath = ""
     }
 }

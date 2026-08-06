@@ -101,6 +101,11 @@ struct VideoListPane: View {
             Text("or click “Add Videos” below")
                 .font(.callout)
                 .foregroundStyle(.tertiary)
+            Text("MP4, MOV, AVI, MKV, WebM, WMV, FLV, MPEG and more")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
             Spacer()
         }
         .frame(maxWidth: .infinity)
@@ -185,9 +190,16 @@ struct VideoRow: View {
             .buttonStyle(.plain)
             .help("Screenlist saved to \(url.path). Click to reveal in Finder.")
         case .failed(let message):
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.yellow)
-                .help(message)
+            // Clickable: the common failure is "install FFmpeg", which is too long
+            // to read in a tooltip.
+            Button {
+                model.lastError = message
+            } label: {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.yellow)
+            }
+            .buttonStyle(.plain)
+            .help(message)
         }
     }
 }
@@ -206,6 +218,7 @@ struct SettingsPane: View {
                     appearanceSection
                     rangeSection
                     outputSection
+                    decodingSection
                 }
                 .padding(14)
             }
@@ -213,6 +226,7 @@ struct SettingsPane: View {
             Divider()
             actionBar
         }
+        .onAppear { model.refreshFFmpegStatus() }
     }
 
     private var layoutSection: some View {
@@ -367,6 +381,54 @@ struct SettingsPane: View {
         }
     }
 
+    private var decodingSection: some View {
+        GroupBox("Decoding") {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: model.ffmpegStatus.isInstalled
+                          ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(model.ffmpegStatus.isInstalled ? .green : .yellow)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("FFmpeg: \(model.ffmpegStatus.summary)")
+                            .font(.callout)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                        Text(model.ffmpegStatus.isInstalled
+                             ? "MP4 and MOV decode natively; FFmpeg handles the rest."
+                             : "Install it with “brew install ffmpeg”, or choose an existing copy.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+
+                HStack(spacing: 8) {
+                    Button("Choose FFmpeg…") { chooseFFmpeg() }
+                    if !settings.ffmpegPath.isEmpty {
+                        Button("Use Automatic") {
+                            settings.ffmpegPath = ""
+                            model.refreshFFmpegStatus()
+                            model.retryFailedItems()
+                        }
+                    }
+                    Button("Re-check") {
+                        model.refreshFFmpegStatus()
+                        model.retryFailedItems()
+                    }
+                    Spacer()
+                }
+
+                Text("Adds AVI, MKV, WebM, WMV, ASF, FLV, DivX, OGV, MXF, VOB, "
+                     + "RealMedia and more. Full list: --cli --formats")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(6)
+        }
+    }
+
     private var actionBar: some View {
         HStack(spacing: 12) {
             Button("Restore Defaults") {
@@ -413,6 +475,21 @@ struct SettingsPane: View {
         panel.message = "Choose the folder where screenlists will be saved"
         if panel.runModal() == .OK, let url = panel.url {
             settings.customFolderPath = url.path
+        }
+    }
+
+    private func chooseFFmpeg() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.treatsFilePackagesAsDirectories = true
+        panel.message = "Select the ffmpeg binary, or the folder containing ffmpeg and ffprobe"
+        panel.directoryURL = URL(fileURLWithPath: "/opt/homebrew/bin")
+        if panel.runModal() == .OK, let url = panel.url {
+            settings.ffmpegPath = url.path
+            model.refreshFFmpegStatus()
+            model.retryFailedItems()
         }
     }
 }

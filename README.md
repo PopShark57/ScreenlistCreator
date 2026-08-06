@@ -12,6 +12,8 @@ timestamps, exported as a single image.
 
 - **Drag & drop** one or more videos into the queue (or ⌘O / "Add Videos", or drop
   them on the Dock icon). Batch processing with per-video progress.
+- **Wide format support**: AVI, MKV, WebM, WMV, FLV, MPEG and more besides the
+  MP4/MOV family — see [Video formats](#video-formats).
 - **Grid**: 1–12 rows × 1–10 columns, sheet width 640–6144 px, adjustable cell
   spacing and outer margin.
 - **Appearance**: dark or light sheet theme; optional header with file name, size,
@@ -24,6 +26,36 @@ timestamps, exported as a single image.
   `{time}`, `{rows}`, `{cols}` tokens, and a keep-both/overwrite collision policy.
 - **Preview** button renders a reduced-size sheet without writing any file.
 - Settings persist between launches.
+
+## Video formats
+
+Frames are read through one of two decoders, chosen per file:
+
+| Decoder | Handles | Needs |
+| --- | --- | --- |
+| AVFoundation | `.mp4` `.m4v` `.mov` `.qt` `.3gp` `.3g2` `.ts` `.m2ts` `.mts` `.m2t` `.mpg` `.mpeg` `.mpe` `.m1v` `.m2v` `.dv` | nothing — built into macOS |
+| FFmpeg | `.avi` `.mkv` `.webm` `.wmv` `.asf` `.flv` `.f4v` `.divx` `.ogv` `.ogm` `.rm` `.rmvb` `.mxf` `.vob` `.mod` `.tod` `.mpv` `.mk3d` `.nut` `.gxf` `.wtv` `.vro` `.y4m` `.amv` | `ffmpeg` + `ffprobe` on the machine |
+
+Every file is tried with AVFoundation first, because it is faster and hardware
+accelerated. A file it cannot open — or opens but cannot decode, which is common
+for AVI and Matroska carrying codecs macOS has no decoder for — is handed to
+FFmpeg. Individual frames that fail on the AVFoundation path also fall back to
+FFmpeg, so a partially damaged file still fills its grid.
+
+FFmpeg is **optional**: without it the app behaves as it always did and the extra
+formats report a clear error instead of failing silently. To enable them:
+
+```bash
+brew install ffmpeg
+```
+
+The app looks in `/opt/homebrew/bin`, `/usr/local/bin`, `/opt/local/bin`, `/sw/bin`,
+`/usr/bin`, `$PATH`, and `Contents/Helpers` inside its own bundle — a GUI app
+launched from Finder does not inherit a shell `PATH`, so the well-known locations
+are checked directly. If your copy lives elsewhere, point at it under **Decoding**
+in the settings pane. Dropping `ffmpeg` and `ffprobe` into `Contents/Helpers`
+makes a self-contained bundle; that location wins over anything installed on the
+machine.
 
 ## Building
 
@@ -47,16 +79,25 @@ The binary inside the bundle also works headlessly, which is handy for scripting
 and testing:
 
 ```bash
-"dist/Screenlist Creator.app/Contents/MacOS/ScreenlistCreator" --cli video.mp4 \
-    [--out folder] [--rows N] [--cols N] [--format jpeg|png|heic|tiff] [--width px]
+"dist/Screenlist Creator.app/Contents/MacOS/ScreenlistCreator" --cli video.mkv \
+    [--out folder] [--rows N] [--cols N] [--format jpeg|png|heic|tiff] [--width px] \
+    [--ffmpeg /path/to/ffmpeg]
 ```
+
+It reports which decoder was used, e.g. `… 640×360, MPEG-4 (XVID), 4.4 MB [FFmpeg]`.
+`--cli --formats` prints the format table above along with the resolved FFmpeg path.
 
 ## Project layout
 
 | Path | Purpose |
 | --- | --- |
-| `Sources/ScreenlistCreator/ScreenlistEngine.swift` | Frame extraction (AVFoundation) + sheet composition (CoreGraphics) + export (ImageIO) |
-| `Sources/ScreenlistCreator/VideoMetadata.swift` | Duration/resolution/codec/fps/size loading |
+| `Sources/ScreenlistCreator/ScreenlistEngine.swift` | Frame extraction dispatch + sheet composition (CoreGraphics) + export (ImageIO) |
+| `Sources/ScreenlistCreator/VideoMetadata.swift` | Duration/resolution/codec/fps/size loading, backend selection |
+| `Sources/ScreenlistCreator/VideoFormats.swift` | Supported container list, `MediaBackend` |
+| `Sources/ScreenlistCreator/AVFoundationBackend.swift` | Native frame extraction + decodability probe |
+| `Sources/ScreenlistCreator/FFmpegBackend.swift` | `ffprobe` metadata + `ffmpeg` frame extraction |
+| `Sources/ScreenlistCreator/FFmpegTool.swift` | Locates `ffmpeg`/`ffprobe`, reads its version |
+| `Sources/ScreenlistCreator/ProcessRunner.swift` | Child-process helper (pipe draining, cancellation, timeout) |
 | `Sources/ScreenlistCreator/TextRenderer.swift` | CoreText line drawing (AppKit-free, background-safe) |
 | `Sources/ScreenlistCreator/Settings.swift` | Settings model, persisted to `UserDefaults` |
 | `Sources/ScreenlistCreator/AppViewModel.swift` | Video queue, generation orchestration |

@@ -2,7 +2,8 @@ import Foundation
 
 /// Headless mode used for testing the engine without the UI:
 ///   ScreenlistCreator --cli <video> [--out <folder>] [--rows N] [--cols N]
-///                     [--format jpeg|png|heic|tiff] [--width N]
+///                     [--format jpeg|png|heic|tiff] [--width N] [--ffmpeg <path>]
+///   ScreenlistCreator --cli --formats
 enum CLIRunner {
     static func run(arguments: [String]) -> Int32 {
         var args = arguments.dropFirst() // skip executable
@@ -23,13 +24,15 @@ enum CLIRunner {
             case "--cols": cols = Int(iterator.next() ?? "") ?? cols
             case "--format": format = ImageFormat(rawValue: iterator.next() ?? "") ?? format
             case "--width": width = Int(iterator.next() ?? "") ?? width
+            case "--ffmpeg": FFmpegLocator.overridePath = iterator.next() ?? ""
+            case "--formats": printFormats(); return 0
             default:
                 if videoPath == nil { videoPath = arg }
             }
         }
 
         guard let videoPath else {
-            FileHandle.standardError.write(Data("Usage: ScreenlistCreator --cli <video> [--out folder] [--rows N] [--cols N] [--format jpeg|png|heic|tiff] [--width N]\n".utf8))
+            FileHandle.standardError.write(Data("Usage: ScreenlistCreator --cli <video> [--out folder] [--rows N] [--cols N] [--format jpeg|png|heic|tiff] [--width N] [--ffmpeg path]\n       ScreenlistCreator --cli --formats\n".utf8))
             return 2
         }
 
@@ -64,7 +67,7 @@ enum CLIRunner {
         Task.detached {
             do {
                 let metadata = try await VideoMetadataLoader.load(url: videoURL)
-                print("Video: \(videoURL.lastPathComponent) — \(metadata.durationText), \(metadata.resolutionText), \(metadata.codecName), \(metadata.fileSizeText)")
+                print("Video: \(videoURL.lastPathComponent) — \(metadata.durationText), \(metadata.resolutionText), \(metadata.codecName), \(metadata.fileSizeText) [\(metadata.backend.displayName)]")
                 let image = try await ScreenlistEngine.renderSheet(
                     videoURL: videoURL,
                     metadata: metadata,
@@ -83,5 +86,16 @@ enum CLIRunner {
 
         semaphore.wait()
         return exitCode
+    }
+
+    private static func printFormats() {
+        if let tool = FFmpegLocator.locate() {
+            print("FFmpeg: \(tool.ffmpeg.path)")
+            print("ffprobe: \(tool.ffprobe.path)")
+        } else {
+            print("FFmpeg: not found — only \(VideoFormats.nativeFileExtensions.sorted().map { ".\($0)" }.joined(separator: " ")) will open")
+        }
+        print("Native: " + VideoFormats.nativeFileExtensions.sorted().map { ".\($0)" }.joined(separator: " "))
+        print("Via FFmpeg: " + VideoFormats.ffmpegOnlyFileExtensions.map { ".\($0)" }.joined(separator: " "))
     }
 }
