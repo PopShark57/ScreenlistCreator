@@ -31,6 +31,20 @@ playground.xcworkspace
 
 .build/
 
+# Local packaging / build outputs (scripts/build-app.sh, make_icon.swift)
+build/
+dist/
+*.app
+*.dmg
+*.pkg
+
+# Xcode DerivedData / user state
+DerivedData/
+*.xcuserstate
+
+# macOS
+.DS_Store
+
 # CocoaPods
 #
 # We recommend against adding the Pods directory to your .gitignore. However
